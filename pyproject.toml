@@ -1,0 +1,26 @@
+[project]
+name = "casio-watch"
+version = "0.1.0"
+description = "CLI for configuring Casio G-Shock watches over BLE from Linux"
+requires-python = ">=3.12"
+dependencies = [
+    "gshock-api",
+    "textual",
+]
+
+[project.scripts]
+casio-watch = "casio_watch.cli:main"
+casio-watch-tui = "casio_watch.tui:main"
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B"]
