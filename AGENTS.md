@@ -16,10 +16,18 @@ There is intentionally **no bubblewrap sandbox**: BLE needs direct access to the
 python <script.py>
 ```
 
-**Run the CLI:**
+**Run the TUI:**
 
 ```bash
-casio-watch --help
+casio-watch-tui          # real watch
+casio-watch-tui --mock   # fake watch
+```
+
+**Enter the environment:**
+
+```bash
+direnv allow .           # once, after editing .envrc
+direnv reload            # after changing flake.nix
 ```
 
 **Add a dependency:**
@@ -28,10 +36,10 @@ casio-watch --help
 2. Run `UV_PYTHON="" UV_PYTHON_DOWNLOADS=never uv lock`
 3. Run `touch flake.nix && direnv reload` to rebuild the environment
 
-**Run a command in the environment:**
+**Run a command in the environment (from any directory):**
 
 ```bash
-direnv exec . <command>
+direnv exec /home/antonym/projects/personal/casio <command>
 ```
 
 Do not run `uv sync`, `pip install`, or `python -m venv`. The venv is built by Nix and is read-only.
