@@ -97,6 +97,45 @@ send 1
 sleep 0.4
 check "panel 1 is settings" "Time format"
 
+send 3
+sleep 0.4
+check "panel 3 is reminders" "Reminders"
+
+send Enter
+sleep 0.4
+check "reminder menu opens" "Edit title"
+send Enter
+sleep 0.4
+check "reminder title prompt" "EDIT"
+type_text "Pharmacy"
+send Enter
+sleep 0.4
+check "reminder title saved" "Pharmacy"
+
+send Enter
+sleep 0.4
+send Down
+send Enter
+sleep 0.4
+type_text "2026-11-03"
+send Enter
+sleep 0.4
+check "reminder date saved" "2026-Nov-03"
+
+send w
+sleep 0.4
+check "reminder write asks confirmation" "Write these changes"
+send Enter
+if wait_for "Changes written and verified"; then
+  echo "PASS  reminder write confirms read-back"; PASS=$((PASS + 1))
+else
+  echo "FAIL  reminder write confirmation missing"; capture; FAIL=$((FAIL + 1))
+fi
+
+send 1
+sleep 0.4
+check "back to settings panel" "Time format"
+
 send /
 sleep 0.3
 check "filter prompt opens" "EDIT"

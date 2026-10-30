@@ -15,6 +15,8 @@ class Backend(Protocol):
     async def alarms(self) -> list[dict[str, Any]]: ...
     async def timer(self) -> int: ...
     async def time_adjustment(self) -> bool: ...
+    async def reminders(self) -> list[dict[str, Any]]: ...
+    async def set_reminders(self, reminders: list[dict[str, Any]]) -> None: ...
     async def set_settings(self, settings: dict[str, Any]) -> None: ...
     async def set_alarms(self, alarms: list[dict[str, Any]]) -> None: ...
     async def set_time(self) -> None: ...
@@ -46,6 +48,12 @@ class RealBackend:
 
     async def time_adjustment(self) -> bool:
         return await self.api.get_time_adjustment()
+
+    async def reminders(self) -> list[dict[str, Any]]:
+        return await self.api.get_reminders()
+
+    async def set_reminders(self, reminders: list[dict[str, Any]]) -> None:
+        await self.api.set_reminders(reminders)
 
     async def set_settings(self, settings: dict[str, Any]) -> None:
         await self.api.set_settings(settings)
@@ -87,6 +95,20 @@ class FakeBackend:
         ]
         self.writes: list[tuple[str, Any]] = []
         self._time_adjustment = True
+        self._reminders: list[dict[str, Any]] = [self._empty_reminder(i) for i in range(5)]
+
+    @staticmethod
+    def _empty_reminder(index: int) -> dict[str, Any]:
+        return {
+            "title": "",
+            "time": {
+                "enabled": False,
+                "repeat_period": "NEVER",
+                "start_date": {"year": 2026, "month": "JANUARY", "day": 1 + index},
+                "end_date": {"year": 2026, "month": "JANUARY", "day": 1 + index},
+                "days_of_week": [],
+            },
+        }
 
     async def name(self) -> str:
         return "CASIO GA-B2100"
@@ -105,6 +127,13 @@ class FakeBackend:
 
     async def time_adjustment(self) -> bool:
         return self._time_adjustment
+
+    async def reminders(self) -> list[dict[str, Any]]:
+        return [dict(item) for item in self._reminders]
+
+    async def set_reminders(self, reminders: list[dict[str, Any]]) -> None:
+        self._reminders = [dict(item) for item in reminders]
+        self.writes.append(("reminders", reminders))
 
     async def set_settings(self, settings: dict[str, Any]) -> None:
         self._settings.update(settings)

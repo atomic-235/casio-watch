@@ -56,9 +56,12 @@ Do not run `uv sync`, `pip install`, or `python -m venv`. The venv is built by N
 - `casio-watch-tui --mock` runs against `casio_watch.backend.FakeBackend`.
 - `tests/tmux_scenarios.sh` drives the mock TUI through tmux and asserts on
   `capture-pane` output. Run it after any TUI change.
-- Interaction model (lazygit/nvim): panels `1`/`2`, selection `j/k`, toggle
+- Interaction model (lazygit/nvim): panels `1`/`2`/`3`, selection `j/k`, toggle
   `space`, edit `enter`, cancel `esc`, filter `/`, help `?`. Never reintroduce
   tab-through-fields or global printable-key editing.
+- Reminders are day-level (Casio's protocol has no hour/minute), max 5 slots,
+  each with title/date/repeat/enabled. The TUI sends all five slots back on
+  write; `FakeBackend` mirrors them for tmux tests.
 - Text editing happens only in the bottom `EditorInput`; `enter` submits,
   `esc` cancels.
 - Textual inputs need width >= border(2) + padding(2) + text, or the content

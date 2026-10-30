@@ -8,9 +8,10 @@ prompt for text. No tabbing through form fields.
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import os
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum, auto
 from pathlib import Path
 from typing import Any
@@ -65,17 +66,23 @@ CHOICES = {
 }
 BOOLEANS = {"auto_light", "power_saving_mode", "button_tone", "time_adjustment"}
 ALARM_COUNT = 5
+REMINDER_COUNT = 5
+REPEAT_PERIODS = ["NEVER", "WEEKLY", "MONTHLY", "YEARLY"]
+MONTHS = [
+    "JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE",
+    "JULY", "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER",
+]
 OP_TIMEOUT = 20
 CONFIG_PATH = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "casio-watch" / "config.json"
 
 HELP_TEXT = """\
 Keys (normal mode)
 
-  1 / 2         Watch settings / Alarms panel
+  1 / 2 / 3     Settings / Alarms / Reminders panel
   tab           next panel
   j / k         move selection
   g / G         first / last row
-  space         toggle value or alarm
+  space         toggle value, alarm or reminder
   enter         edit value / open menu
   c             toggle hourly chime (alarms panel)
   /             filter rows
@@ -115,6 +122,50 @@ def format_seconds(total: int) -> str:
     return f"{minutes}:{seconds:02d}"
 
 
+def empty_reminder(index: int = 0) -> dict[str, Any]:
+    today = date.today()
+    stamp = {"year": today.year, "month": MONTHS[today.month - 1], "day": today.day}
+    return {
+        "title": "",
+        "time": {
+            "enabled": False,
+            "repeat_period": "NEVER",
+            "start_date": dict(stamp),
+            "end_date": dict(stamp),
+            "days_of_week": [],
+        },
+    }
+
+
+def normalize_reminders(raw: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for item in (raw or [])[:REMINDER_COUNT]:
+        if not isinstance(item, dict) or "time" not in item:
+            result.append(empty_reminder(len(result)))
+        else:
+            result.append(item)
+    while len(result) < REMINDER_COUNT:
+        result.append(empty_reminder(len(result)))
+    return result
+
+
+def reminder_date_text(reminder: dict[str, Any]) -> str:
+    start = (reminder.get("time") or {}).get("start_date") or {}
+    if not start:
+        return "-"
+    month = str(start.get("month", ""))[:3].title()
+    return f"{start.get('year', '----')}-{month}-{int(start.get('day', 0)):02d}"
+
+
+def reminder_date_iso(reminder: dict[str, Any]) -> str:
+    start = (reminder.get("time") or {}).get("start_date") or {}
+    try:
+        month = MONTHS.index(str(start.get("month", "")).upper()) + 1
+    except ValueError:
+        month = 1
+    return f"{int(start.get('year', 2026)):04d}-{month:02d}-{int(start.get('day', 1)):02d}"
+
+
 class State(Enum):
     DISCONNECTED = auto()
     CONNECTING = auto()
@@ -147,6 +198,28 @@ class ChoiceScreen(ModalScreen[str | None]):
         for index, value in enumerate(self.options):
             if value == self.current:
                 choices.highlighted = index
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        self.dismiss(event.option.id)
+
+
+class ActionMenu(ModalScreen[str | None]):
+    """Small context menu (reminder row actions)."""
+
+    BINDINGS = [Binding("escape", "dismiss(None)", "Cancel")]
+
+    def __init__(self, title: str, options: list[tuple[str, str]]) -> None:
+        super().__init__()
+        self.title = title
+        self.options = options
+
+    def compose(self) -> ComposeResult:
+        with Container(id="menu"):
+            yield Label(self.title)
+            yield OptionList(*[Option(label, id=action) for label, action in self.options], id="actions")
+
+    def on_mount(self) -> None:
+        self.query_one("#actions", OptionList).focus()
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         self.dismiss(event.option.id)
@@ -213,6 +286,7 @@ class CasioTUI(App):
         Binding("w", "write", "Write"),
         Binding("1", "view('settings')", "Settings"),
         Binding("2", "view('alarms')", "Alarms"),
+        Binding("3", "view('reminders')", "Reminders"),
         Binding("tab", "next_view", "Panel"),
         Binding("j", "cursor_down", "Down", show=False),
         Binding("k", "cursor_up", "Up", show=False),
@@ -235,6 +309,7 @@ class CasioTUI(App):
         self.filter_text = ""
         self.settings: dict[str, Any] = {}
         self.alarms: list[dict[str, Any]] = []
+        self.reminders: list[dict[str, Any]] = normalize_reminders([])
         self.adjustment = False
         self.timer = 0
         self.condition: dict[str, Any] = {}
@@ -324,7 +399,7 @@ class CasioTUI(App):
                 if self.filter_text and self.filter_text.lower() not in f"{label} {value}".lower():
                     continue
                 table.add_row(label, self.display_name(value), key=key)
-        else:
+        elif self.view == "alarms":
             self.query_one("#view-title", Static).update("Alarms")
             table.add_column("Alarm", key="name")
             table.add_column("Time", key="value")
@@ -340,6 +415,25 @@ class CasioTUI(App):
                     "on" if alarm["enabled"] else "off",
                     "chime" if index == 0 and alarm["hasHourlyChime"] else "",
                     key=f"alarm-{index}",
+                )
+        else:
+            self.query_one("#view-title", Static).update("Reminders")
+            table.add_column("Reminder", key="name")
+            table.add_column("Date", key="value")
+            table.add_column("Repeat", key="repeat")
+            table.add_column("On", key="on")
+            for index, reminder in enumerate(self.reminders[:REMINDER_COUNT]):
+                title = str(reminder.get("title", "")).strip()
+                name = title or f"Reminder {index + 1}"
+                time = reminder.get("time") or {}
+                if self.filter_text and self.filter_text.lower() not in f"{title} {name}".lower():
+                    continue
+                table.add_row(
+                    name,
+                    reminder_date_text(reminder),
+                    str(time.get("repeat_period", "NEVER")),
+                    "on" if time.get("enabled") else "off",
+                    key=f"reminder-{index}",
                 )
 
         if table.row_count:
@@ -360,7 +454,8 @@ class CasioTUI(App):
         self.query_one(DataTable).focus()
 
     def action_next_view(self) -> None:
-        self.action_view("alarms" if self.view == "settings" else "settings")
+        order = ["settings", "alarms", "reminders"]
+        self.action_view(order[(order.index(self.view) + 1) % len(order)])
 
     def action_cursor_down(self) -> None:
         self.query_one(DataTable).action_cursor_down()
@@ -383,6 +478,10 @@ class CasioTUI(App):
         if self.view == "alarms":
             index = int(key.split("-")[1])
             self.alarms[index]["enabled"] = not self.alarms[index]["enabled"]
+        elif self.view == "reminders":
+            index = int(key.split("-")[1])
+            time = self.reminders[index].setdefault("time", {})
+            time["enabled"] = not time.get("enabled", False)
         elif key in BOOLEANS:
             if key == "time_adjustment":
                 self.adjustment = not self.adjustment
@@ -433,6 +532,10 @@ class CasioTUI(App):
                 lambda value, i=index: self.apply_alarm_time(i, value),
             )
             return
+        if self.view == "reminders":
+            index = int(key.split("-")[1])
+            self.open_reminder_menu(index)
+            return
 
         if key in CHOICES:
             self.choose(key)
@@ -444,6 +547,79 @@ class CasioTUI(App):
             )
         elif key in BOOLEANS:
             self.action_toggle()
+
+    # ---------- reminders ----------
+
+    def open_reminder_menu(self, index: int) -> None:
+        options = [
+            ("Edit title", "title"),
+            ("Edit date", "date"),
+            ("Repeat period", "repeat"),
+            ("Toggle enabled", "toggle"),
+            ("Clear reminder", "clear"),
+        ]
+        self.push_screen(
+            ActionMenu(f"Reminder {index + 1}", options),
+            callback=lambda action: self.reminder_action(index, action),
+        )
+
+    def reminder_action(self, index: int, action: str | None) -> None:
+        if action is None:
+            self.query_one(DataTable).focus()
+            return
+        reminder = self.reminders[index]
+        time = reminder.setdefault("time", {})
+        if action == "title":
+            self.open_prompt(
+                "reminder title (max 18)",
+                str(reminder.get("title", "")),
+                lambda value: self.apply_reminder_title(index, value),
+            )
+        elif action == "date":
+            self.open_prompt(
+                "date YYYY-MM-DD",
+                reminder_date_iso(reminder),
+                lambda value: self.apply_reminder_date(index, value),
+            )
+        elif action == "repeat":
+            self.push_screen(
+                ChoiceScreen("Repeat period", REPEAT_PERIODS, str(time.get("repeat_period", "NEVER"))),
+                callback=lambda value: self.apply_reminder_repeat(index, value),
+            )
+        elif action == "toggle":
+            time["enabled"] = not time.get("enabled", False)
+            self.rebuild()
+            self.query_one(DataTable).focus()
+        elif action == "clear":
+            self.reminders[index] = empty_reminder(index)
+            self.rebuild()
+            self.query_one(DataTable).focus()
+
+    def apply_reminder_title(self, index: int, value: str) -> None:
+        self.reminders[index]["title"] = value[:18]
+        self.rebuild()
+        self.query_one(DataTable).focus()
+
+    def apply_reminder_date(self, index: int, value: str) -> None:
+        try:
+            parsed = datetime.strptime(value.strip(), "%Y-%m-%d").date()
+        except ValueError:
+            self.notify("Use YYYY-MM-DD", severity="warning")
+            return
+        stamp = {"year": parsed.year, "month": MONTHS[parsed.month - 1], "day": parsed.day}
+        time = self.reminders[index].setdefault("time", {})
+        time["start_date"] = dict(stamp)
+        time["end_date"] = dict(stamp)
+        time["enabled"] = True
+        self.rebuild()
+        self.query_one(DataTable).focus()
+
+    def apply_reminder_repeat(self, index: int, value: str | None) -> None:
+        if value is not None:
+            time = self.reminders[index].setdefault("time", {})
+            time["repeat_period"] = value
+        self.rebuild()
+        self.query_one(DataTable).focus()
 
     def choose(self, key: str) -> None:
         current = self.display_name(self.settings.get(key, ""))
@@ -589,6 +765,7 @@ class CasioTUI(App):
             alarms = await asyncio.wait_for(self.backend.alarms(), timeout=OP_TIMEOUT)
             timer = await asyncio.wait_for(self.backend.timer(), timeout=OP_TIMEOUT)
             adjustment = await asyncio.wait_for(self.backend.time_adjustment(), timeout=OP_TIMEOUT)
+            reminders = await asyncio.wait_for(self.backend.reminders(), timeout=OP_TIMEOUT)
         except Exception as exc:  # noqa: BLE001
             self.set_state(State.STALE)
             self.notify(f"Read failed: {type(exc).__name__}", severity="error")
@@ -598,11 +775,13 @@ class CasioTUI(App):
         self.condition = condition
         self.settings = dict(settings)
         self.alarms = [dict(alarm) for alarm in alarms]
+        self.reminders = normalize_reminders(reminders)
         self.timer = timer
         self.adjustment = bool(adjustment)
         self._baseline = {
             "settings": dict(self.settings),
             "alarms": [dict(alarm) for alarm in self.alarms],
+            "reminders": copy.deepcopy(self.reminders),
             "adjustment": self.adjustment,
         }
         self.query_one("#watch-name", Static).update(f"{name}\n{self._address}")
@@ -636,6 +815,11 @@ class CasioTUI(App):
         for index, (old, new) in enumerate(zip(self._baseline.get("alarms", []), self.alarms, strict=False)):
             if old != new:
                 lines.append(f"Alarm {index + 1}: {old} -> {new}")
+        for index, (old, new) in enumerate(zip(self._baseline.get("reminders", []), self.reminders, strict=False)):
+            if old != new:
+                old_title = str(old.get("title", "")).strip() or "(empty)"
+                new_title = str(new.get("title", "")).strip() or "(empty)"
+                lines.append(f"Reminder {index + 1}: {old_title} -> {new_title} on {reminder_date_text(new)}")
         return lines
 
     @work
@@ -658,15 +842,29 @@ class CasioTUI(App):
 
         async with self._lock:
             try:
-                await asyncio.wait_for(self.backend.set_settings(self.settings), timeout=OP_TIMEOUT)
-                await asyncio.wait_for(
-                    self.backend.set_time_adjustment(
-                        time_adjustment=self.adjustment,
-                        minutes_after_hour=int(self.settings.get("time_adjustment_minutes_after_hour", 30)),
-                    ),
-                    timeout=OP_TIMEOUT,
+                base = self._baseline
+                settings_changed = base.get("settings") != self.settings
+                minutes_changed = base.get("settings", {}).get("time_adjustment_minutes_after_hour") != self.settings.get(
+                    "time_adjustment_minutes_after_hour"
                 )
-                await asyncio.wait_for(self.backend.set_alarms(self.alarms), timeout=OP_TIMEOUT)
+                adjustment_changed = base.get("adjustment") != self.adjustment or minutes_changed
+                alarms_changed = base.get("alarms") != self.alarms
+                reminders_changed = base.get("reminders") != self.reminders
+
+                if settings_changed:
+                    await asyncio.wait_for(self.backend.set_settings(self.settings), timeout=OP_TIMEOUT)
+                if adjustment_changed:
+                    await asyncio.wait_for(
+                        self.backend.set_time_adjustment(
+                            time_adjustment=self.adjustment,
+                            minutes_after_hour=int(self.settings.get("time_adjustment_minutes_after_hour", 30)),
+                        ),
+                        timeout=OP_TIMEOUT,
+                    )
+                if alarms_changed:
+                    await asyncio.wait_for(self.backend.set_alarms(self.alarms), timeout=OP_TIMEOUT)
+                if reminders_changed:
+                    await asyncio.wait_for(self.backend.set_reminders(self.reminders), timeout=OP_TIMEOUT)
             except Exception as exc:  # noqa: BLE001
                 self.set_state(State.STALE)
                 self.notify(f"Write failed: {type(exc).__name__}", severity="error")

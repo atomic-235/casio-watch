@@ -42,7 +42,7 @@ prompt for text.
 
 | Key | Action |
 |---|---|
-| `1` / `2` | Settings / Alarms panel |
+| `1` / `2` / `3` | Settings / Alarms / Reminders panel |
 | `tab` | next panel |
 | `j` / `k` | move selection |
 | `g` / `G` | first / last row |
@@ -55,7 +55,10 @@ prompt for text.
 | `?` / `q` | help / quit |
 
 Editing uses the bottom prompt: `enter` commits, `esc` cancels. Digits only
-type while the prompt is open — there is no tab-through-fields.
+type while the prompt is open — there is no tab-through-fields. In the
+Reminders panel, `enter` opens a menu (title, date, repeat period, toggle,
+clear); dates are entered as `YYYY-MM-DD` and are day-level, matching Casio's
+reminder protocol.
 
 Mock mode (no watch needed):
 
