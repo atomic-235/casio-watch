@@ -151,9 +151,9 @@ def normalize_reminders(raw: list[dict[str, Any]] | None) -> list[dict[str, Any]
 
 def reminder_date_text(reminder: dict[str, Any]) -> str:
     start = (reminder.get("time") or {}).get("start_date") or {}
-    if not start:
-        return "-"
     month = str(start.get("month", ""))[:3].title()
+    if not month:
+        return "-"
     return f"{start.get('year', '----')}-{month}-{int(start.get('day', 0)):02d}"
 
 
@@ -740,7 +740,17 @@ class CasioTUI(App):
             self.notify("Connect failed - hold MODE and retry", severity="error")
             return False
 
-        self.backend = RealBackend(connection)
+        self.backend = RealBackend(connection, self._name)
+        self.set_state(State.CONNECTING, "pairing")
+        try:
+            await self.backend.pair()
+        except Exception as exc:  # noqa: BLE001
+            await self.backend.disconnect()
+            self.backend = None
+            self.set_state(State.DISCONNECTED, "pairing failed")
+            self.notify(f"Pairing failed: {exc} - see casio.log", severity="error")
+            return False
+
         await self._read_watch()
         return True
 
@@ -786,7 +796,10 @@ class CasioTUI(App):
         }
         self.query_one("#watch-name", Static).update(f"{name}\n{self._address}")
         self.query_one("#battery", Static).update(f"battery: {condition.get('battery_level_percent')}%")
-        self.query_one("#temp", Static).update(f"temp: {condition.get('temperature')} °C")
+        temperature = condition.get("temperature")
+        self.query_one("#temp", Static).update(
+            f"temp: {temperature} °C" if temperature is not None else "temp: --"
+        )
         self.query_one("#timer", Static).update(f"timer: {format_seconds(timer)}")
         self.query_one("#read", Static).update(f"read: {datetime.now():%H:%M:%S}")
         if not self.mock:
@@ -844,9 +857,8 @@ class CasioTUI(App):
             try:
                 base = self._baseline
                 settings_changed = base.get("settings") != self.settings
-                minutes_changed = base.get("settings", {}).get("time_adjustment_minutes_after_hour") != self.settings.get(
-                    "time_adjustment_minutes_after_hour"
-                )
+                minutes_key = "time_adjustment_minutes_after_hour"
+                minutes_changed = base.get("settings", {}).get(minutes_key) != self.settings.get(minutes_key)
                 adjustment_changed = base.get("adjustment") != self.adjustment or minutes_changed
                 alarms_changed = base.get("alarms") != self.alarms
                 reminders_changed = base.get("reminders") != self.reminders

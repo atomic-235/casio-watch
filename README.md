@@ -3,7 +3,7 @@
 CLI to read and configure Casio G-Shock watches from Linux over Bluetooth LE
 (BlueZ), using [`gshock-api`](https://github.com/izivkov/gshock_api).
 
-Tested with a GA-B2100.
+Tested with a GA-B2100 and a GBX-100.
 
 ## Usage
 
@@ -33,7 +33,8 @@ casio-watch-tui
 
 Press **`s`** and hold the watch's lower-left `MODE` button for ~3 s. The watch
 is saved to `~/.config/casio-watch/config.json`, so later sessions are just
-`s`. The TUI shows battery/temperature and edits clock format, date format,
+`s`. On GBX-100/GBD models the TUI also runs Casio's pairing handshake
+automatically (~15 s, no button press on the watch). The TUI shows battery/temperature and edits clock format, date format,
 language, light duration, auto light, power saving, button tone, time
 adjustment and all five alarms/chime.
 
@@ -86,6 +87,9 @@ by Ivo Zivkov (MIT). This project is a Linux CLI/TUI on top of it.
 - Do **not** call `BleakClient.pair()` — Casio watches reject BLE pairing with
   `org.bluez.Error.AuthenticationFailed` and the watch shows `ERR`. GATT writes
   work without bonding.
+- GBX-100/GBD watches only pair after Casio's app-level init sequence; the TUI
+  sends it on connect (see `casio_watch.pairing`). Without it the watch answers
+  name/condition/settings reads and then stops.
 - Casio watches only advertise for a short window after the connect button is
   pressed; start the command first, then press the button.
 - The hourly chime is the `0x80` flag on alarm slot 0.

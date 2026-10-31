@@ -6,9 +6,13 @@ from typing import Any, Protocol
 
 from gshock_api.connection import Connection
 from gshock_api.gshock_api import GshockAPI
+from gshock_api.watch_info import watch_info as gshock_watch_info
+
+from casio_watch.pairing import finish_pairing, needs_pairing
 
 
 class Backend(Protocol):
+    async def pair(self) -> None: ...
     async def name(self) -> str: ...
     async def condition(self) -> dict[str, Any]: ...
     async def settings(self) -> dict[str, Any]: ...
@@ -27,15 +31,27 @@ class Backend(Protocol):
 class RealBackend:
     """Thin adapter over gshock_api."""
 
-    def __init__(self, connection: Connection) -> None:
+    def __init__(self, connection: Connection, name: str = "") -> None:
         self.connection = connection
         self.api = GshockAPI(connection)
+        self._advertised_name = name
+
+    async def pair(self) -> None:
+        if not needs_pairing(self._advertised_name):
+            return
+        # Gadgetbridge sends app information as soon as the watch returns its name.
+        await self.api.get_watch_name()
+        if not await finish_pairing(self.connection, self._advertised_name):
+            raise RuntimeError("watch did not finish pairing")
 
     async def name(self) -> str:
         return await self.api.get_watch_name()
 
     async def condition(self) -> dict[str, Any]:
-        return await self.api.get_watch_condition()
+        condition = await self.api.get_watch_condition()
+        if not gshock_watch_info.hasTemperature:
+            condition.pop("temperature", None)
+        return condition
 
     async def settings(self) -> dict[str, Any]:
         return await self.api.get_basic_settings()
@@ -109,6 +125,9 @@ class FakeBackend:
                 "days_of_week": [],
             },
         }
+
+    async def pair(self) -> None:
+        self.writes.append(("pair", None))
 
     async def name(self) -> str:
         return "CASIO GA-B2100"

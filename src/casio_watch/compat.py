@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -17,8 +18,27 @@ from gshock_api import message_dispatcher
 
 _original_on_received = message_dispatcher.MessageDispatcher.on_received
 
+# Every notification, before the library's own dispatch. Used to observe
+# protocol keys the library does not know (0x3D / 0x47 on GBX-100).
+_raw_listeners: list[Callable[[bytes], None]] = []
+
+
+def add_raw_listener(listener: Callable[[bytes], None]) -> None:
+    if listener not in _raw_listeners:
+        _raw_listeners.append(listener)
+
+
+def remove_raw_listener(listener: Callable[[bytes], None]) -> None:
+    if listener in _raw_listeners:
+        _raw_listeners.remove(listener)
+
 
 def _safe_on_received(data: bytes, protocol: Any = None) -> None:
+    for listener in list(_raw_listeners):
+        try:
+            listener(bytes(data))
+        except Exception:  # noqa: BLE001
+            pass
     try:
         _original_on_received(data, protocol)
     except RuntimeError:

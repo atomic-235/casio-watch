@@ -58,6 +58,24 @@ Do not run `uv sync`, `pip install`, or `python -m venv`. The venv is built by N
   an unsolicited notification before a read registers its result.
   `casio_watch.compat.install()` swallows those packets and is called by both
   entry points.
+- GBX-100 / GBD watches need Casio's app-level init ("pairing") sequence before
+  they will do anything but answer a few plain reads. `casio_watch.pairing`
+  ports Gadgetbridge's `gbx100/InitOperation`: app info, BLE settings,
+  advertising/connection parameters, module ID → condition → version → DST, then
+  current time + `00 01` when the watch asks with `0x47 02`. It finishes with
+  `0x3D`. Pairing runs on every connect and needs no button press on the watch.
+- The init packet's write is never acknowledged; write it without waiting or the
+  connect hangs (Gadgetbridge aborts the transaction for the same reason).
+- Subscribe only to the ALL_FEATURES characteristic (`26eb002d…`). Subscribing
+  to the step-counter/convoy characteristics as the library does makes the
+  GBX-100 drop the link.
+- gshock_api only resolves the watch model inside its own scanner; `ble.py`
+  connects directly, so it calls `watch_info.set_name_and_model()` itself.
+  Without that every capability check falls back to GENERIC.
+- The GBX-100 advertises a new random address on most connections, so a saved
+  address is only a hint — always scan.
+- The GBX-100 has no thermometer; the condition packet's second byte is not a
+  temperature, and its battery byte is not a 9..19 scale either.
 
 ## TUI testing
 
